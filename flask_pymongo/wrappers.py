@@ -27,9 +27,10 @@ from pymongo import collection
 from pymongo import mongo_client
 from pymongo import database
 from pymongo import mongo_replica_set_client
+from bson.objectid import ObjectId
 
 from flask import abort
-
+import logging
 
 class MongoClient(mongo_client.MongoClient):
     """Returns instances of :class:`flask_pymongo.wrappers.Database` instead
@@ -59,6 +60,19 @@ class Database(database.Database):
     notation.
     """
 
+    _tenant_field = None
+
+    @property
+    def tenant_field(self):
+        return self._tenant_field
+    @tenant_field.setter
+    def tenant_field(self, value):
+        self._tenant_field = value
+    
+    # def __init__(self, connection, name):
+    #     self.tenant = None
+    #     return super(Database, self).__init__(collection, name)
+
     def __getattr__(self, name):
         attr = super(Database, self).__getattr__(name)
         if isinstance(attr, collection.Collection):
@@ -76,6 +90,99 @@ class Collection(collection.Collection):
             db = self._Collection__database
             return Collection(db, attr.name)
         return attr
+
+    def save(self, to_save, manipulate=True,
+             safe=None, check_keys=True, **kwargs):
+
+        if not isinstance(to_save, dict):
+            raise TypeError("cannot save object of type %s" % type(to_save))
+
+        if self.database.tenant_field:
+            to_save.update(self.database.tenant_field)
+
+        return super(Collection, self).save(to_save, manipulate, safe,
+            check_keys, **kwargs)
+
+    def insert(self, doc_or_docs, manipulate=True,
+               safe=None, check_keys=True, continue_on_error=False, **kwargs):
+
+        if self.database.tenant_field:
+            if isinstance(doc_or_docs, (list, tuple)):
+                updated_docs = []
+                for doc in doc_or_docs:
+                    doc.update(self.database.tenant_field)
+                    updated_docsa.append(doc)
+            else:
+                doc_or_docs.update(self.database.tenant_field)
+
+            return super(Collection, self).save(doc_or_docs, manipulate,
+                safe, check_keys, continue_on_error, **kwargs)
+
+    def update(self, spec, document, upsert=False, manipulate=False,
+               safe=None, multi=False, check_keys=True, **kwargs):
+
+        if not isinstance(spec, dict):
+            raise TypeError("spec must be an instance of dict")
+
+        if not isinstance(document, dict):
+            raise TypeError("document must be an instance of dict")
+
+        if self.database.tenant_field is not None:
+            # Apply tenant field to query
+            spec.update(self.database.tenant_field)
+
+            # Apply tenant field to update document
+            document.update(self.database.tenant_field)
+
+        return super(Collection, self).update(
+            spec, document, upsert, manipulate, safe, multi, check_keys, **kwargs
+        )
+
+    def remove(self, spec_or_id=None, safe=None, **kwargs):
+
+        if self.database.tenant_field:
+            if not isinstance(spec_or_id, dict):
+                spec_or_id = {"_id": spec_or_id}
+
+            spec_or_id.update(self.database.tenant_field)
+
+        return super(Collection, self).remove(spec_or_id, safe, **kwargs)
+
+    def find_one(self, spec_or_id=None, *args, **kwargs):
+        logging.error(str(self.database.tenant_field))
+        if self.database.tenant_field:
+            if not isinstance(spec_or_id, dict):
+                spec_or_id = {"_id": spec_or_id}
+
+            spec_or_id.update(self.database.tenant_field)
+
+        return super(Collection, self).find_one(spec_or_id, *args, **kwargs)
+
+
+    def find(self, *args, **kwargs):
+        logging.error(str(args))
+        if self.database.tenant_field:
+            if (args is None) or (args == ()):
+                args = {}
+
+            args.update(self.database.tenant_field)
+
+        return super(Collection, self).find(*args, **kwargs)
+
+    def find_and_modify(self, query={}, update=None,
+                        upsert=False, sort=None, **kwargs):
+
+        if self.database.tenant_field:
+            query.update(self.database.tenant_field)
+
+            if not isinstance(update, dict):
+                update = {}
+
+            update.update(self.database.tenant_field)
+
+        return super(Collection, self).find_and_modify(query,
+            update, upsert, sort, **kwargs)
+
 
     def find_one_or_404(self, *args, **kwargs):
         """Find and return a single document, or raise a 404 Not Found
